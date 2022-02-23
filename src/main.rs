@@ -262,28 +262,26 @@ fn main() -> Result<()> {
     let mut sxv = SexprView::new(exp, 25, 10);
 
     loop {
-        if poll(Duration::from_millis(0))? {
-            match read()? {
-                Event::Key(KeyEvent {
-                    code: KeyCode::Esc, ..
-                }) => break,
-                Event::Key(KeyEvent {
-                    code: KeyCode::Up, ..
-                }) => sxv.move_cursor_out_of_list(),
-                Event::Key(KeyEvent {
-                    code: KeyCode::Down,
-                    ..
-                }) => sxv.move_cursor_into_list(),
-                Event::Key(KeyEvent {
-                    code: KeyCode::Right,
-                    ..
-                }) => sxv.move_cursor_in_list(1),
-                Event::Key(KeyEvent {
-                    code: KeyCode::Left,
-                    ..
-                }) => sxv.move_cursor_in_list(-1),
-                _ => {}
-            }
+        match read()? {
+            Event::Key(KeyEvent {
+                code: KeyCode::Esc, ..
+            }) => break,
+            Event::Key(KeyEvent {
+                code: KeyCode::Up, ..
+            }) => sxv.move_cursor_out_of_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }) => sxv.move_cursor_into_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Right,
+                ..
+            }) => sxv.move_cursor_in_list(1),
+            Event::Key(KeyEvent {
+                code: KeyCode::Left,
+                ..
+            }) => sxv.move_cursor_in_list(-1),
+            _ => {}
         }
 
         queue!(&mut stdout, style::ResetColor)?;
@@ -332,7 +330,6 @@ fn main() -> Result<()> {
         Framed::new(sxv.clone()).draw(&mut stdout, 7, 20)?;
 
         stdout.flush()?;
-        std::thread::sleep(Duration::from_millis(50));
     }
 
     execute!(stdout, terminal::LeaveAlternateScreen)?;
