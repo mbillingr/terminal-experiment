@@ -1,134 +1,144 @@
-use std::fmt::Display;
+#[macro_use]
+mod sxfmt;
+
+use crate::sxfmt::{Formatter, PrettyExpr, PrettyFormatter};
+use crossterm::style::Color;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{
     cursor,
     event::{poll, read, Event},
     execute, queue, style,
-    style::Stylize,
-    terminal, Result,
+    style::{ContentStyle, Stylize},
+    terminal, ErrorKind, Result,
 };
+use std::fmt::Display;
 use std::io::{stdout, Write};
 use std::time::Duration;
-use crossterm::style::Color;
-
 
 pub trait Item {
-    fn draw_line(&self, buf: &mut impl Write, line: u16) -> Result<()>;
-
     fn size(&self) -> (u16, u16);
+    fn draw(&self, buf: &mut impl Write, x: u16, y: u16) -> Result<()>;
+}
 
-    fn draw(&self, buf: &mut impl Write, x: u16, y:u16) -> Result<()> {
-        for i in 0..Hello.size().1 {
-            queue!(buf, cursor::MoveTo(x, y+i))?;
-            Hello.draw_line(buf, i)?;
+const DEFAULT_FRAME: [char;8] = ['╔', '═', '╗', '║', '║', '╚', '═', '╝'];
+
+struct Framed<T: Item> {
+    tiles: &'static[char],
+    inner: T
+}
+
+impl<T: Item> Framed<T> {
+    pub fn new(inner: T) -> Self {
+        Framed {
+            tiles: &DEFAULT_FRAME,
+            inner,
         }
-        Ok(())
     }
 }
 
+impl<T: Item> Item for Framed<T> {
+    fn draw(&self, buf: &mut impl Write, x: u16, y:u16) -> Result<()> {
+        let (width, height) = self.inner.size();
+
+        queue!(buf, cursor::MoveTo(x, y))?;
+        queue!(buf, style::Print(self.tiles[0]))?;
+        for _ in 0..width {
+            queue!(buf, style::Print(self.tiles[1]))?;
+        }
+        queue!(buf, style::Print(self.tiles[2]))?;
+
+        for i in 1..height+1 {
+            queue!(buf, cursor::MoveTo(x, y+i))?;
+            queue!(buf, style::Print(self.tiles[3]), cursor::MoveRight(width), style::Print(self.tiles[4]))?;
+        }
+
+        queue!(buf, cursor::MoveTo(x, y+height+1))?;
+        queue!(buf, style::Print(self.tiles[5]))?;
+        for _ in 0..width {
+            queue!(buf, style::Print(self.tiles[6]))?;
+        }
+        queue!(buf, style::Print(self.tiles[7]))?;
+
+        self.inner.draw(buf, x+1, y+1)
+    }
+
+    fn size(&self) -> (u16, u16) {
+        let (w, h) = self.inner.size();
+        (w+2, h+2)
+    }
+}
 
 struct Hello;
 
 impl Item for Hello {
-    fn draw_line(&self, buf: &mut impl Write, line: u16) -> Result<()> {
-        queue!(buf, style::SetForegroundColor(Color::Yellow), style::SetBackgroundColor(Color::DarkBlue))?;
-        match line {
-            0 => queue!(buf, style::Print("+-----------------+")),
-            1 => queue!(buf, style::Print("|"), style::PrintStyledContent("  Hello, World!  ".yellow().on_dark_blue()), style::Print("|")),
-            2 => queue!(buf, style::Print("+-----------------+")),
-            _ => Ok(()),
-        }
-    }
-
     fn size(&self) -> (u16, u16) {
-        return (19, 3)
+        return (19, 3);
+    }
+
+    fn draw(&self, buf: &mut impl Write, x: u16, y: u16) -> Result<()> {
+        queue!(
+            buf,
+            style::SetForegroundColor(Color::Yellow),
+            style::SetBackgroundColor(Color::DarkBlue)
+        )?;
+        queue!(buf, cursor::MoveTo(x, y), style::Print("+-----------------+"))?;
+        queue!(
+                buf,
+                cursor::MoveTo(x, y+1),
+                style::Print("|"),
+                style::Print("  Hello, World!  "),
+                style::Print("|")
+            )?;
+        queue!(buf, cursor::MoveTo(x, y+2), style::Print("+-----------------+"))
     }
 }
 
-
-pub enum PrintExp {
-    Atom(String),
-    Static(&'static str),
-    List(Vec<PrintExp>),
+struct CrosstermFormatter<'a, W: Write> {
+    buf: &'a mut W,
+    current_style: ContentStyle,
+    saved_styles: Vec<ContentStyle>,
 }
 
-const MAX_WIDTH: usize = 15;
-const MAX_OPERATOR_MIX_LENGTH: usize = 4;
-
-impl PrintExp {
-    fn print(&self) {
-        if let Some(x) = self.print_inline(0) {
-            print!("{}", x)
-        }
-
-        if let Some(x) = self.print_mixed(0, 0) {
-            print!("{}", x)
-        }
-
-        if let Some(x) = self.print_long(0, 0) {
-            print!("{}", x)
-        }
-    }
-
-    fn print_inline(&self, current_column: usize) -> Option<String> {
-        // (if q a e)
-        match self {
-            PrintExp::Atom(s) => Some(format!("{}", s)),
-            PrintExp::Static(s) => Some(format!("{}", s)),
-            PrintExp::List(xs) => {
-                let mut items = vec![];
-                for x in xs {
-                    items.push(x.print_inline(current_column)?);
-                }
-                let out = format!("({})", items.join(" "));
-                if current_column + out.len() > MAX_WIDTH {
-                    None
-                } else {
-                    Some(out)
-                }
-            }
+impl<'a, W: Write> CrosstermFormatter<'a, W> {
+    pub fn new(buf: &'a mut W) -> Self {
+        CrosstermFormatter {
+            buf,
+            current_style: Default::default(),
+            saved_styles: vec![],
         }
     }
+}
 
-    fn print_mixed(&self, current_column: usize, next_indent: usize) -> Option<String> {
-        // (if q
-        //     a
-        //     e)
-        todo!()
+impl<'a, W: Write> Formatter<ContentStyle> for CrosstermFormatter<'a, W> {
+    type Error = ErrorKind;
+
+    fn write(&mut self, x: impl std::fmt::Display) -> std::result::Result<(), Self::Error> {
+        queue!(self.buf, style::Print(x))
     }
 
-    fn print_long(&self, current_column: usize, next_indent: usize) -> Option<String> {
-        // (if
-        //   q
-        //   a
-        //   e)
-        todo!()
+    fn set_style(&mut self, style: &ContentStyle) {
+        self.current_style = *style;
+
+        if let Some(fg) = style.foreground_color {
+            queue!(self.buf, style::SetForegroundColor(fg)).unwrap()
+        }
+
+        if let Some(bg) = style.background_color {
+            queue!(self.buf, style::SetBackgroundColor(bg)).unwrap()
+        }
+
+        queue!(self.buf, style::SetAttributes(style.attributes)).unwrap();
+    }
+
+    fn save_style(&mut self) {
+        self.saved_styles.push(self.current_style)
+    }
+
+    fn restore_style(&mut self) {
+        let style = self.saved_styles.pop().unwrap();
+        self.set_style(&style);
     }
 }
-
-
-pub trait PrettyPrint {
-    fn prepare(&self) -> PrintExp;
-}
-
-impl PrettyPrint for () {
-    fn prepare(&self) -> PrintExp {
-        PrintExp::Static("()")
-    }
-}
-
-impl<T: PrettyPrint> PrettyPrint for Vec<T> {
-    fn prepare(&self) -> PrintExp {
-        PrintExp::List(self.iter().map(PrettyPrint::prepare).collect())
-    }
-}
-
-
-fn pretty_print<T:PrettyPrint>(x: &T) {
-    x.prepare().print();
-}
-
-
 
 fn main() -> Result<()> {
     let mut stdout = stdout();
@@ -146,6 +156,11 @@ fn main() -> Result<()> {
                 _ => {}
             }
         }
+
+        queue!(&mut stdout, style::ResetColor)?;
+
+        let hi = Framed::new(Hello);
+        hi.draw(&mut stdout, 25, 20)?;
 
         Hello.draw(&mut stdout, 25, 25)?;
         Hello.draw(&mut stdout, 20, 26)?;
@@ -182,6 +197,18 @@ fn main() -> Result<()> {
             cursor::MoveTo(pos.0 as u16, pos.1 as u16),
             style::PrintStyledContent("*".green())
         )?;
+
+        queue!(stdout, cursor::MoveTo(0, 30))?;
+        let mut cf = CrosstermFormatter::new(&mut stdout);
+        let pf = PrettyFormatter::default();
+        let exp = pe![(let ((a 1) (b 2) (c 3)) ("+" a b))];
+        let exp = PrettyExpr::styled(ContentStyle::default().white().on_black(), exp);
+        let exp = exp
+            .with_style(&[1, 1, 0], ContentStyle::default().on_dark_green())
+            .unwrap();
+        println!("{:?}", exp);
+        let pe = pf.pretty(exp);
+        pe.write(&mut cf)?;
 
         stdout.flush()?;
         std::thread::sleep(Duration::from_millis(50));
