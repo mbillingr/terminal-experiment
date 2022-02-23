@@ -31,7 +31,21 @@ impl<T> PrettyExpr<T> {
             ([], x) => Some(Self::styled(style, x)),
             ([p, rest @ ..], Inline(xs)) => Self::list_with_style(xs, *p, rest, style).map(Inline),
             ([p, rest @ ..], Expand(xs)) => Self::list_with_style(xs, *p, rest, style).map(Expand),
-            _ => todo!("{:?}", path),
+            (_, Atom(_) | Stat(_)) => None,
+        }
+    }
+
+    pub fn is_valid_path(&self, path: &[usize]) -> bool {
+        self.get(path).is_some()
+    }
+
+    pub fn get(&self, path: &[usize]) -> Option<&Self> {
+        use PrettyExpr::*;
+        match (path, self) {
+            (_, Style(_, x)) => x.get(path),
+            ([], x) => Some(x),
+            ([p, rest @ ..], Inline(xs) | Expand(xs)) => xs.get(*p).and_then(|x| x.get(rest)),
+            (_, Atom(_) | Stat(_)) => None,
         }
     }
 
@@ -54,11 +68,19 @@ impl<T> PrettyExpr<T> {
         Some(out)
     }
 
-    fn is_atom(&self) -> bool {
+    pub fn is_atom(&self) -> bool {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => true,
             PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => false,
             PrettyExpr::Style(_, x) => x.is_atom(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => 0,
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => xs.len(),
+            PrettyExpr::Style(_, x) => x.len(),
         }
     }
 
@@ -78,8 +100,8 @@ impl<T> PrettyExpr<T> {
 
 #[derive(Copy, Clone)]
 pub struct PrettyFormatter {
-    max_code_width: usize,
-    default_indent: usize,
+    pub max_code_width: usize,
+    pub default_indent: usize,
 }
 
 impl Default for PrettyFormatter {
@@ -99,6 +121,12 @@ pub struct Pretty<T> {
 impl<T> Pretty<T> {
     pub fn write<F: Formatter<T>>(&self, f: &mut F) -> Result<(), F::Error> {
         self.pf.write(&self.pe, 0, f)
+    }
+
+    pub fn with_style(self, path: &[usize], style: impl Into<T>) -> Option<Self> {
+        self.pe
+            .with_style(path, style)
+            .map(|pe| Pretty { pe, ..self })
     }
 }
 
@@ -223,8 +251,12 @@ pub trait Formatter<S> {
     fn save_style(&mut self);
     fn restore_style(&mut self);
 
+    fn write_newline(&mut self) -> std::result::Result<(), Self::Error> {
+        self.write("\n")
+    }
+
     fn write_indent(&mut self, level: usize) -> std::result::Result<(), Self::Error> {
-        self.write("\n")?;
+        self.write_newline()?;
         self.write(" ".repeat(level))
     }
 }
