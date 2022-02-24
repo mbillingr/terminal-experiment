@@ -10,6 +10,7 @@ macro_rules! pe {
 pub enum PrettyExpr<T = ()> {
     Atom(String),
     Stat(&'static str),
+    Quote(Box<PrettyExpr<T>>),
     Inline(Vec<PrettyExpr<T>>),
     Expand(Vec<PrettyExpr<T>>),
     Style(T, Box<PrettyExpr<T>>),
@@ -18,6 +19,9 @@ pub enum PrettyExpr<T = ()> {
 impl<T> PrettyExpr<T> {
     pub fn list(xs: Vec<PrettyExpr<T>>) -> Self {
         PrettyExpr::Inline(xs)
+    }
+    pub fn quote(x: PrettyExpr<T>) -> Self {
+        PrettyExpr::Quote(Box::new(x))
     }
 
     pub fn styled(style: impl Into<T>, exp: impl Into<PrettyExpr<T>>) -> Self {
@@ -31,6 +35,7 @@ impl<T> PrettyExpr<T> {
             ([], x) => Some(Self::styled(style, x)),
             ([p, rest @ ..], Inline(xs)) => Self::list_with_style(xs, *p, rest, style).map(Inline),
             ([p, rest @ ..], Expand(xs)) => Self::list_with_style(xs, *p, rest, style).map(Expand),
+            ([_, rest @ ..], Quote(x)) => x.with_style(rest, style).map(Self::quote),
             (_, Atom(_) | Stat(_)) => None,
         }
     }
@@ -44,6 +49,7 @@ impl<T> PrettyExpr<T> {
         match (path, self) {
             (_, Style(_, x)) => x.get(path),
             ([], x) => Some(x),
+            (_, Quote(x)) => x.get(&path[1..]),
             ([p, rest @ ..], Inline(xs) | Expand(xs)) => xs.get(*p).and_then(|x| x.get(rest)),
             (_, Atom(_) | Stat(_)) => None,
         }
@@ -54,6 +60,7 @@ impl<T> PrettyExpr<T> {
         match (path, self) {
             (_, Style(_, x)) => x.get_mut(path),
             ([], x) => Some(x),
+            (_, Quote(x)) => x.get_mut(&path[1..]),
             ([p, rest @ ..], Inline(xs) | Expand(xs)) => {
                 xs.get_mut(*p).and_then(|x| x.get_mut(rest))
             }
@@ -83,6 +90,16 @@ impl<T> PrettyExpr<T> {
     pub fn is_atom(&self) -> bool {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => true,
+            PrettyExpr::Quote(_) => false,
+            PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => false,
+            PrettyExpr::Style(_, x) => x.is_atom(),
+        }
+    }
+
+    pub fn is_quotation(&self) -> bool {
+        match self {
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => false,
+            PrettyExpr::Quote(_) => true,
             PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => false,
             PrettyExpr::Style(_, x) => x.is_atom(),
         }
@@ -91,6 +108,7 @@ impl<T> PrettyExpr<T> {
     pub fn is_empty_list(&self) -> bool {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => false,
+            PrettyExpr::Quote(_) => false,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => xs.is_empty(),
             PrettyExpr::Style(_, x) => x.is_empty_list(),
         }
@@ -100,6 +118,7 @@ impl<T> PrettyExpr<T> {
         match self {
             PrettyExpr::Atom(s) => Some(s),
             PrettyExpr::Stat(s) => Some(s),
+            PrettyExpr::Quote(_) => None,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) if xs.is_empty() => Some(""),
             PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => None,
             PrettyExpr::Style(_, x) => x.get_text(),
@@ -109,6 +128,7 @@ impl<T> PrettyExpr<T> {
     pub fn elements(&self) -> Option<&[Self]> {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Quote(_) => None,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => Some(xs.as_slice()),
             PrettyExpr::Style(_, x) => x.elements(),
         }
@@ -117,14 +137,25 @@ impl<T> PrettyExpr<T> {
     pub fn elements_mut(&mut self) -> Option<&mut Vec<Self>> {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Quote(_) => None,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => Some(xs),
             PrettyExpr::Style(_, x) => x.elements_mut(),
+        }
+    }
+
+    pub fn remove_item(&mut self, idx: usize) -> Option<Self> {
+        match self {
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Quote(x) => Some(std::mem::replace(x, PrettyExpr::list(vec![]))),
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => Some(xs.remove(idx)),
+            PrettyExpr::Style(_, x) => x.remove_item(idx),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => 0,
+            PrettyExpr::Quote(_) => 1,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => xs.len(),
             PrettyExpr::Style(_, x) => x.len(),
         }
@@ -134,6 +165,7 @@ impl<T> PrettyExpr<T> {
         match self {
             PrettyExpr::Atom(x) => x.len(),
             PrettyExpr::Stat(x) => x.len(),
+            PrettyExpr::Quote(x) => 1 + x.inline_width(),
             PrettyExpr::Inline(xs) => {
                 let n_spaces = if xs.len() < 2 { 0 } else { xs.len() - 1 };
                 2 + xs.iter().map(PrettyExpr::inline_width).sum::<usize>() + n_spaces
@@ -206,6 +238,7 @@ impl PrettyFormatter {
                         .collect(),
                 )
             }
+            PrettyExpr::Quote(x) => PrettyExpr::quote(self.prepare_recursively(*x, current_indent)),
             PrettyExpr::Style(s, x) => {
                 PrettyExpr::styled(s, self.prepare_recursively(*x, current_indent))
             }
@@ -228,6 +261,10 @@ impl PrettyFormatter {
         match pe {
             PrettyExpr::Atom(x) => f.write(x),
             PrettyExpr::Stat(x) => f.write(x),
+            PrettyExpr::Quote(x) => {
+                f.write("'")?;
+                self.write(x, indent_level + 1, f)
+            }
             PrettyExpr::Inline(xs) => self.write_inline(xs, f),
             PrettyExpr::Expand(xs) => self.write_expanded(xs, indent_level, f),
             PrettyExpr::Style(s, x) => {

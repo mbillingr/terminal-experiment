@@ -8,7 +8,7 @@ pub struct SexprView {
     expr: PrettyExpr<style::ContentStyle>,
     width: u16,
     height: u16,
-    cursor: Option<Vec<usize>>,
+    cursor: Vec<usize>,
 }
 
 impl SexprView {
@@ -17,98 +17,68 @@ impl SexprView {
             expr,
             width,
             height,
-            cursor: Some(vec![1]),
+            cursor: vec![],
         }
     }
 
     pub fn move_cursor_out_of_list(&mut self) {
-        match &mut self.cursor {
-            None => {}
-            Some(c) if c.is_empty() => self.cursor = None,
-            Some(c) => {
-                if self.expr.is_valid_path(c) {
-                    c.pop().unwrap();
-                }
-            }
-        }
+        self.cursor.pop();
     }
 
     pub fn move_cursor_into_list(&mut self) {
-        match &mut self.cursor {
-            None => self.cursor = Some(vec![]),
-            Some(c) => {
-                c.push(0);
-                if !self.expr.is_valid_path(c) {
-                    c.pop().unwrap();
-                }
-            }
+        self.cursor.push(0);
+        if !self.expr.is_valid_path(&self.cursor) {
+            self.cursor.pop().unwrap();
         }
     }
 
     pub fn move_cursor_in_list(&mut self, dir: i8) {
-        match &mut self.cursor {
-            None => self.cursor = Some(vec![]),
-            Some(c) if c.is_empty() => {}
-            Some(c) => {
-                let new_pos = c.pop().unwrap() as isize + dir as isize;
-                let l = self.expr.get(c).unwrap().len() as isize;
-                let new_pos = (new_pos + l) % l as isize;
-                c.push(new_pos as usize);
-            }
+        if self.cursor.is_empty() {
+            return;
         }
+        let new_pos = self.cursor.pop().unwrap() as isize + dir as isize;
+        let l = self.expr.get(&self.cursor).unwrap().len() as isize;
+        let new_pos = (new_pos + l) % l as isize;
+        self.cursor.push(new_pos as usize);
     }
 
     pub fn append_at_cursor(&mut self, postfix: &str) {
-        match &self.cursor {
-            None => {}
-            Some(c) => {
-                let x = self.expr.get_mut(c).unwrap();
-                if let Some(text) = x.get_text() {
-                    let text = text.to_string() + postfix;
-                    *x = PrettyExpr::Atom(text);
-                } else if x.is_empty_list() {
-                    x.elements_mut()
-                        .unwrap()
-                        .push(PrettyExpr::Atom(postfix.to_string()));
-                    self.move_cursor_into_list();
-                }
-            }
+        let x = self.expr.get_mut(&self.cursor).unwrap();
+        if let Some(text) = x.get_text() {
+            let text = text.to_string() + postfix;
+            *x = PrettyExpr::Atom(text);
+        } else if x.is_empty_list() {
+            x.elements_mut()
+                .unwrap()
+                .push(PrettyExpr::Atom(postfix.to_string()));
+            self.move_cursor_into_list();
         }
     }
 
     pub fn delete_at_cursor(&mut self) {
-        match &self.cursor {
-            None => {}
-            Some(c) => {
-                let x = self.expr.get_mut(c).unwrap();
-                if let Some(text) = x.get_text() {
-                    let mut text = text.to_string();
-                    text.pop();
-                    if text.is_empty() {
-                        *x = PrettyExpr::list(vec![]);
-                    } else {
-                        *x = PrettyExpr::Atom(text);
-                    }
-                }
+        let x = self.expr.get_mut(&self.cursor).unwrap();
+        if let Some(text) = x.get_text() {
+            let mut text = text.to_string();
+            text.pop();
+            if text.is_empty() {
+                *x = PrettyExpr::list(vec![]);
+            } else {
+                *x = PrettyExpr::Atom(text);
             }
         }
     }
 
     pub fn delete_cursor_element(&mut self) {
-        match self.cursor.as_ref().map(Vec::as_slice) {
-            Some([c_list @ .., c_elem]) => {
+        match self.cursor.as_slice() {
+            [c_list @ .., c_elem] => {
                 let c_elem = *c_elem;
-                let elements = self
-                    .expr
-                    .get_mut(c_list)
-                    .and_then(PrettyExpr::elements_mut)
-                    .unwrap();
-                elements.remove(c_elem);
-                if elements.is_empty() {
-                    self.cursor.as_mut().unwrap().pop();
+                let x = self.expr.get_mut(c_list).unwrap();
+                x.remove_item(c_elem);
+                if x.is_empty_list() {
+                    self.cursor.pop();
                 } else {
-                    let last = self.cursor.as_mut().and_then(|c| c.last_mut()).unwrap();
-                    *last = usize::min(c_elem, elements.len() - 1)
+                    let last = self.cursor.last_mut().unwrap();
+                    *last = usize::min(c_elem, x.len() - 1)
                 }
             }
             _ => {}
@@ -116,41 +86,39 @@ impl SexprView {
     }
 
     pub fn insert_element_after_cursor(&mut self) {
-        match self.cursor.as_ref().map(Vec::as_slice) {
-            Some([c_list @ .., c_elem]) => {
+        match self.cursor.as_slice() {
+            [c_list @ .., c_elem] => {
                 let c_elem = *c_elem;
-                let elements = self
-                    .expr
-                    .get_mut(c_list)
-                    .and_then(PrettyExpr::elements_mut)
-                    .unwrap();
-                elements.insert(c_elem + 1, PrettyExpr::Inline(vec![]));
-                self.move_cursor_in_list(1);
+                let x = self.expr.get_mut(c_list).unwrap();
+                if x.is_quotation() {
+                    self.move_cursor_out_of_list();
+                    self.insert_element_after_cursor();
+                } else {
+                    let elements = x.elements_mut().unwrap();
+                    elements.insert(c_elem + 1, PrettyExpr::Inline(vec![]));
+                    self.move_cursor_in_list(1);
+                }
             }
             _ => {}
         }
     }
 
+    pub fn quote_cursor(&mut self) {
+        let x = self.expr.get_mut(&self.cursor).unwrap();
+        let y = x.clone();
+        *x = PrettyExpr::quote(y);
+    }
+
     pub fn wrap_cursor_in_list(&mut self) {
-        match &self.cursor {
-            None => {}
-            Some(c) => {
-                let x = self.expr.get_mut(c).unwrap();
-                let y = x.clone();
-                *x = PrettyExpr::list(vec![y]);
-            }
-        }
+        let x = self.expr.get_mut(&self.cursor).unwrap();
+        let y = x.clone();
+        *x = PrettyExpr::list(vec![y]);
     }
 
     pub fn unwrap_unary_list_at_cursor(&mut self) {
-        match &self.cursor {
-            None => {}
-            Some(c) => {
-                let x = self.expr.get_mut(c).unwrap();
-                if let Some([y]) = x.elements() {
-                    *x = y.clone();
-                }
-            }
+        let x = self.expr.get_mut(&self.cursor).unwrap();
+        if let Some([y]) = x.elements() {
+            *x = y.clone();
         }
     }
 }
@@ -162,15 +130,16 @@ impl Item for SexprView {
 
     fn draw(&self, buf: &mut impl Write, x: u16, y: u16) -> crossterm::Result<()> {
         queue!(buf, cursor::MoveTo(x, y))?;
+        queue!(buf, style::Print(format!("{:?}", self.cursor)))?;
+        let y = y + 2;
+        queue!(buf, cursor::MoveTo(x, y))?;
         let mut pf = PrettyFormatter::default();
         pf.max_code_width = self.width as usize;
         let mut pe = pf.pretty(self.expr.clone());
 
-        if let Some(path) = &self.cursor {
-            pe = pe
-                .with_style(path, style::ContentStyle::new().on_dark_green())
-                .unwrap();
-        }
+        pe = pe
+            .with_style(&self.cursor, style::ContentStyle::new().on_dark_green())
+            .unwrap();
 
         let mut cf = CrosstermFormatter::new(buf, x, y);
         pe.write(&mut cf)
@@ -191,11 +160,20 @@ impl EventHandler for SexprView {
             Key(KeyEvent { code: PageUp, .. }) => self.wrap_cursor_in_list(),
             Key(KeyEvent { code: PageDown, .. }) => self.unwrap_unary_list_at_cursor(),
             Key(KeyEvent {
+                code: Char('\''), ..
+            }) => {
+                self.quote_cursor();
+                self.move_cursor_into_list();
+            }
+            Key(KeyEvent {
                 code: Char('('), ..
-            }) => self.wrap_cursor_in_list(),
+            }) => {
+                self.wrap_cursor_in_list();
+                self.move_cursor_into_list();
+            }
             Key(KeyEvent {
                 code: Char(')'), ..
-            }) => {}
+            }) => self.move_cursor_out_of_list(),
             Key(KeyEvent {
                 code: Char(' '), ..
             }) => self.insert_element_after_cursor(),
