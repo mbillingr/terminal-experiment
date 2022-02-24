@@ -137,7 +137,7 @@ impl<'a, W: Write> Formatter<ContentStyle> for CrosstermFormatter<'a, W> {
 
 fn main() -> Result<()> {
     let mut stdout = stdout();
-    //enable_raw_mode()?;
+    enable_raw_mode()?;
 
     //execute!(stdout, /*terminal::EnterAlternateScreen,*/ cursor::Hide)?;
 
@@ -170,7 +170,7 @@ fn main() -> Result<()> {
     }
 
     //execute!(stdout, cursor::Show, /*terminal::LeaveAlternateScreen*/)?;
-    //disable_raw_mode()?;
+    disable_raw_mode()?;
 
     Ok(())
 }
