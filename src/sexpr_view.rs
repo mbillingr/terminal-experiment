@@ -85,7 +85,7 @@ impl SexprView {
                     let mut text = text.to_string();
                     text.pop();
                     if text.is_empty() {
-                        *x = PrettyExpr::Placeholder;
+                        *x = PrettyExpr::list(vec![]);
                     } else {
                         *x = PrettyExpr::Atom(text);
                     }
