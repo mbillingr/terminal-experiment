@@ -8,6 +8,7 @@ macro_rules! pe {
 
 #[derive(Debug, Clone)]
 pub enum PrettyExpr<T = ()> {
+    Placeholder,
     Atom(String),
     Stat(&'static str),
     Inline(Vec<PrettyExpr<T>>),
@@ -31,7 +32,7 @@ impl<T> PrettyExpr<T> {
             ([], x) => Some(Self::styled(style, x)),
             ([p, rest @ ..], Inline(xs)) => Self::list_with_style(xs, *p, rest, style).map(Inline),
             ([p, rest @ ..], Expand(xs)) => Self::list_with_style(xs, *p, rest, style).map(Expand),
-            (_, Atom(_) | Stat(_)) => None,
+            (_, Atom(_) | Stat(_) | Placeholder) => None,
         }
     }
 
@@ -45,23 +46,19 @@ impl<T> PrettyExpr<T> {
             (_, Style(_, x)) => x.get(path),
             ([], x) => Some(x),
             ([p, rest @ ..], Inline(xs) | Expand(xs)) => xs.get(*p).and_then(|x| x.get(rest)),
-            (_, Atom(_) | Stat(_)) => None,
+            (_, Atom(_) | Stat(_) | Placeholder) => None,
         }
     }
 
-    pub fn set(&mut self, path: &[usize], expr: Self) -> Result<(), Self> {
+    pub fn get_mut(&mut self, path: &[usize]) -> Option<&mut Self> {
         use PrettyExpr::*;
         match (path, self) {
-            (_, Style(_, x)) => x.set(path, expr),
-            ([], x) => {
-                *x = expr;
-                Ok(())
+            (_, Style(_, x)) => x.get_mut(path),
+            ([], x) => Some(x),
+            ([p, rest @ ..], Inline(xs) | Expand(xs)) => {
+                xs.get_mut(*p).and_then(|x| x.get_mut(rest))
             }
-            ([p, rest @ ..], Inline(xs) | Expand(xs)) => match xs.get_mut(*p) {
-                None => Err(expr),
-                Some(x) => x.set(rest, expr),
-            },
-            (_, Atom(_) | Stat(_)) => Err(expr),
+            (_, Atom(_) | Stat(_) | Placeholder) => None,
         }
     }
 
@@ -86,14 +83,53 @@ impl<T> PrettyExpr<T> {
 
     pub fn is_atom(&self) -> bool {
         match self {
+            PrettyExpr::Placeholder => true,
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => true,
             PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => false,
             PrettyExpr::Style(_, x) => x.is_atom(),
         }
     }
 
+    pub fn is_empty_list(&self) -> bool {
+        match self {
+            PrettyExpr::Placeholder => false,
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => false,
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => xs.is_empty(),
+            PrettyExpr::Style(_, x) => x.is_empty_list(),
+        }
+    }
+
+    pub fn get_text(&self) -> Option<&str> {
+        match self {
+            PrettyExpr::Placeholder => Some(""),
+            PrettyExpr::Atom(s) => Some(s),
+            PrettyExpr::Stat(s) => Some(s),
+            PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => None,
+            PrettyExpr::Style(_, x) => x.get_text(),
+        }
+    }
+
+    pub fn elements(&self) -> Option<&[Self]> {
+        match self {
+            PrettyExpr::Placeholder => None,
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => Some(xs.as_slice()),
+            PrettyExpr::Style(_, x) => x.elements(),
+        }
+    }
+
+    pub fn elements_mut(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            PrettyExpr::Placeholder => None,
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => Some(xs),
+            PrettyExpr::Style(_, x) => x.elements_mut(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
+            PrettyExpr::Placeholder => 0,
             PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => 0,
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => xs.len(),
             PrettyExpr::Style(_, x) => x.len(),
@@ -102,6 +138,7 @@ impl<T> PrettyExpr<T> {
 
     fn inline_width(&self) -> usize {
         match self {
+            PrettyExpr::Placeholder => 3,
             PrettyExpr::Atom(x) => x.len(),
             PrettyExpr::Stat(x) => x.len(),
             PrettyExpr::Inline(xs) => {
@@ -109,7 +146,7 @@ impl<T> PrettyExpr<T> {
                 2 + xs.iter().map(PrettyExpr::inline_width).sum::<usize>() + n_spaces
             }
             PrettyExpr::Style(_, x) => x.inline_width(),
-            _ => unimplemented!(),
+            PrettyExpr::Expand(_) => unimplemented!(),
         }
     }
 }
@@ -160,6 +197,7 @@ impl PrettyFormatter {
 
     fn prepare_recursively<T>(&self, pe: PrettyExpr<T>, current_indent: usize) -> PrettyExpr<T> {
         match pe {
+            PrettyExpr::Placeholder => PrettyExpr::Placeholder,
             PrettyExpr::Atom(x) => PrettyExpr::Atom(x),
             PrettyExpr::Stat(x) => PrettyExpr::Stat(x),
             PrettyExpr::Inline(_) if current_indent + pe.inline_width() <= self.max_code_width => {
@@ -196,6 +234,7 @@ impl PrettyFormatter {
         f: &mut F,
     ) -> Result<(), F::Error> {
         match pe {
+            PrettyExpr::Placeholder => f.write("___"),
             PrettyExpr::Atom(x) => f.write(x),
             PrettyExpr::Stat(x) => f.write(x),
             PrettyExpr::Inline(xs) => self.write_inline(xs, f),

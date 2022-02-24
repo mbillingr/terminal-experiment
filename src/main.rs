@@ -121,10 +121,81 @@ impl SexprView {
                 let l = self.expr.get(c).unwrap().len() as isize;
                 let new_pos = (new_pos + l) % l as isize;
                 c.push(new_pos as usize);
-
                 execute!(stdout(), cursor::MoveTo(0, 0)).unwrap();
-                println!("{:?} {}", c, l);
             }
+        }
+    }
+
+    pub fn append_at_cursor(&mut self, postfix: &str) {
+        match &self.cursor {
+            None => {}
+            Some(c) => {
+                let x = self.expr.get_mut(c).unwrap();
+                if let Some(text) = x.get_text() {
+                    let text = text.to_string() + postfix;
+                    *x = PrettyExpr::Atom(text);
+                } else if x.is_empty_list() {
+                    x.elements_mut()
+                        .unwrap()
+                        .push(PrettyExpr::Atom(postfix.to_string()));
+                    self.move_cursor_into_list();
+                }
+            }
+        }
+    }
+
+    pub fn delete_at_cursor(&mut self) {
+        match &self.cursor {
+            None => {}
+            Some(c) => {
+                let x = self.expr.get_mut(c).unwrap();
+                if let Some(text) = x.get_text() {
+                    let mut text = text.to_string();
+                    text.pop();
+                    if text.is_empty() {
+                        *x = PrettyExpr::Placeholder;
+                    } else {
+                        *x = PrettyExpr::Atom(text);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn delete_cursor_element(&mut self) {
+        match self.cursor.as_ref().map(Vec::as_slice) {
+            Some([c_list @ .., c_elem]) => {
+                let c_elem = *c_elem;
+                let elements = self
+                    .expr
+                    .get_mut(c_list)
+                    .and_then(PrettyExpr::elements_mut)
+                    .unwrap();
+                elements.remove(c_elem);
+                if elements.is_empty() {
+                    self.cursor.as_mut().unwrap().pop();
+                } else {
+                    let last = self.cursor.as_mut().and_then(|c| c.last_mut()).unwrap();
+                    *last = usize::min(c_elem, elements.len() - 1)
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn insert_element_after_cursor(&mut self) {
+        match self.cursor.as_ref().map(Vec::as_slice) {
+            Some([c_list @ .., c_elem]) => {
+                let c_elem = *c_elem;
+                let elements = self
+                    .expr
+                    .get_mut(c_list)
+                    .and_then(PrettyExpr::elements_mut)
+                    .unwrap();
+                elements.insert(c_elem + 1, PrettyExpr::Placeholder);
+                self.move_cursor_in_list(1);
+            }
+            _ => {}
         }
     }
 
@@ -132,8 +203,21 @@ impl SexprView {
         match &self.cursor {
             None => {}
             Some(c) => {
-                let x = self.expr.get(c).unwrap().clone();
-                self.expr.set(c, PrettyExpr::list(vec![x])).unwrap();
+                let x = self.expr.get_mut(c).unwrap();
+                let y = x.clone();
+                *x = PrettyExpr::list(vec![y]);
+            }
+        }
+    }
+
+    pub fn unwrap_unary_list_at_cursor(&mut self) {
+        match &self.cursor {
+            None => {}
+            Some(c) => {
+                let x = self.expr.get_mut(c).unwrap();
+                if let Some([y]) = x.elements() {
+                    *x = y.clone();
+                }
             }
         }
     }
@@ -157,10 +241,7 @@ impl Item for SexprView {
         }
 
         let mut cf = CrosstermFormatter::new(buf, x, y);
-        pe.write(&mut cf)?;
-        println!("\n{:?}", self.expr);
-        println!("\n{:?}", pe.pe);
-        Ok(())
+        pe.write(&mut cf)
     }
 }
 
@@ -225,9 +306,9 @@ impl<'a, W: Write> Formatter<ContentStyle> for CrosstermFormatter<'a, W> {
 
 fn main() -> Result<()> {
     let mut stdout = stdout();
-    enable_raw_mode()?;
+    //enable_raw_mode()?;
 
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    //execute!(stdout, /*terminal::EnterAlternateScreen,*/ cursor::Hide)?;
 
     let exp = pe![(let ((a 1) (b 2) (c 3)) ("+" a b))];
     let exp = exp
@@ -237,32 +318,6 @@ fn main() -> Result<()> {
     let mut sxv = SexprView::new(exp, 25, 10);
 
     loop {
-        match read()? {
-            Event::Key(KeyEvent {
-                code: KeyCode::Esc, ..
-            }) => break,
-            Event::Key(KeyEvent {
-                code: KeyCode::Up, ..
-            }) => sxv.move_cursor_out_of_list(),
-            Event::Key(KeyEvent {
-                code: KeyCode::Down,
-                ..
-            }) => sxv.move_cursor_into_list(),
-            Event::Key(KeyEvent {
-                code: KeyCode::Right,
-                ..
-            }) => sxv.move_cursor_in_list(1),
-            Event::Key(KeyEvent {
-                code: KeyCode::Left,
-                ..
-            }) => sxv.move_cursor_in_list(-1),
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('+'),
-                ..
-            }) => sxv.wrap_cursor_in_list(),
-            _ => {}
-        }
-
         queue!(
             &mut stdout,
             terminal::Clear(terminal::ClearType::All),
@@ -272,10 +327,63 @@ fn main() -> Result<()> {
         Framed::new(sxv.clone()).draw(&mut stdout, 7, 20)?;
 
         stdout.flush()?;
+        match read()? {
+            Event::Key(KeyEvent {
+                code: KeyCode::Esc, ..
+            }) => break,
+            Event::Key(KeyEvent {
+                code: KeyCode::Left,
+                ..
+            }) => sxv.move_cursor_out_of_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Right,
+                ..
+            }) => sxv.move_cursor_into_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }) => sxv.move_cursor_in_list(1),
+            Event::Key(KeyEvent {
+                code: KeyCode::Up, ..
+            }) => sxv.move_cursor_in_list(-1),
+            Event::Key(KeyEvent {
+                code: KeyCode::Delete,
+                ..
+            }) => sxv.delete_cursor_element(),
+            Event::Key(KeyEvent {
+                code: KeyCode::PageUp,
+                ..
+            }) => sxv.wrap_cursor_in_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::PageDown,
+                ..
+            }) => sxv.unwrap_unary_list_at_cursor(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('('),
+                ..
+            }) => sxv.wrap_cursor_in_list(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(')'),
+                ..
+            }) => {}
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            }) => sxv.insert_element_after_cursor(),
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(ch),
+                ..
+            }) => sxv.append_at_cursor(&ch.to_string()),
+            Event::Key(KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            }) => sxv.delete_at_cursor(),
+            _ => {}
+        }
     }
 
-    execute!(stdout, terminal::LeaveAlternateScreen)?;
-    disable_raw_mode()?;
+    //execute!(stdout, cursor::Show, /*terminal::LeaveAlternateScreen*/)?;
+    //disable_raw_mode()?;
 
     Ok(())
 }
