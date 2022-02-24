@@ -2,17 +2,15 @@
 mod sxfmt;
 
 use crate::sxfmt::{Formatter, PrettyExpr, PrettyFormatter};
-use crossterm::style::Color;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{
     cursor,
-    event::{poll, read, Event, KeyCode, KeyEvent},
+    event::{read, Event, KeyCode, KeyEvent},
     execute, queue, style,
     style::{ContentStyle, Stylize},
     terminal, ErrorKind, Result,
 };
 use std::io::{stdout, Write};
-use std::time::Duration;
 
 pub trait Item {
     fn size(&self) -> (u16, u16);
@@ -129,6 +127,16 @@ impl SexprView {
             }
         }
     }
+
+    pub fn wrap_cursor_in_list(&mut self) {
+        match &self.cursor {
+            None => {}
+            Some(c) => {
+                let x = self.expr.get(c).unwrap().clone();
+                self.expr.set(c, PrettyExpr::list(vec![x])).unwrap();
+            }
+        }
+    }
 }
 
 impl Item for SexprView {
@@ -149,40 +157,10 @@ impl Item for SexprView {
         }
 
         let mut cf = CrosstermFormatter::new(buf, x, y);
-        pe.write(&mut cf)
-    }
-}
-
-struct Hello;
-
-impl Item for Hello {
-    fn size(&self) -> (u16, u16) {
-        return (19, 3);
-    }
-
-    fn draw(&self, buf: &mut impl Write, x: u16, y: u16) -> Result<()> {
-        queue!(
-            buf,
-            style::SetForegroundColor(Color::Yellow),
-            style::SetBackgroundColor(Color::DarkBlue)
-        )?;
-        queue!(
-            buf,
-            cursor::MoveTo(x, y),
-            style::Print("+-----------------+")
-        )?;
-        queue!(
-            buf,
-            cursor::MoveTo(x, y + 1),
-            style::Print("|"),
-            style::Print("  Hello, World!  "),
-            style::Print("|")
-        )?;
-        queue!(
-            buf,
-            cursor::MoveTo(x, y + 2),
-            style::Print("+-----------------+")
-        )
+        pe.write(&mut cf)?;
+        println!("\n{:?}", self.expr);
+        println!("\n{:?}", pe.pe);
+        Ok(())
     }
 }
 
@@ -251,9 +229,6 @@ fn main() -> Result<()> {
 
     execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
 
-    let mut pos: (i16, i16) = (12, 9);
-    let mut dir: (i16, i16) = (1, 1);
-
     let exp = pe![(let ((a 1) (b 2) (c 3)) ("+" a b))];
     let exp = exp
         .with_style(&[], ContentStyle::default().white().on_black())
@@ -281,51 +256,18 @@ fn main() -> Result<()> {
                 code: KeyCode::Left,
                 ..
             }) => sxv.move_cursor_in_list(-1),
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('+'),
+                ..
+            }) => sxv.wrap_cursor_in_list(),
             _ => {}
         }
 
-        queue!(&mut stdout, style::ResetColor)?;
-
-        /*let hi = Framed::new(Hello);
-        hi.draw(&mut stdout, 25, 20)?;
-
-        Hello.draw(&mut stdout, 25, 25)?;
-        Hello.draw(&mut stdout, 20, 26)?;*/
-
         queue!(
-            stdout,
-            cursor::MoveTo(5, 5),
-            style::Print("+---------------+")
+            &mut stdout,
+            terminal::Clear(terminal::ClearType::All),
+            style::ResetColor
         )?;
-        for y in 6..15 {
-            queue!(
-                stdout,
-                cursor::MoveTo(5, y),
-                style::Print("|               |")
-            )?;
-        }
-        queue!(
-            stdout,
-            cursor::MoveTo(5, 15),
-            style::Print("+---------------+")
-        )?;
-
-        if pos.0 <= 6 || pos.0 >= 20 {
-            dir.0 = -dir.0;
-        }
-
-        if pos.1 <= 6 || pos.1 >= 14 {
-            dir.1 = -dir.1;
-        }
-
-        pos = (pos.0 + dir.0, pos.1 + dir.1);
-        queue!(
-            stdout,
-            cursor::MoveTo(pos.0 as u16, pos.1 as u16),
-            style::PrintStyledContent("*".green())
-        )?;
-
-        queue!(stdout, cursor::MoveTo(0, 30))?;
 
         Framed::new(sxv.clone()).draw(&mut stdout, 7, 20)?;
 

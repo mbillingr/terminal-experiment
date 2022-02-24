@@ -49,6 +49,22 @@ impl<T> PrettyExpr<T> {
         }
     }
 
+    pub fn set(&mut self, path: &[usize], expr: Self) -> Result<(), Self> {
+        use PrettyExpr::*;
+        match (path, self) {
+            (_, Style(_, x)) => x.set(path, expr),
+            ([], x) => {
+                *x = expr;
+                Ok(())
+            }
+            ([p, rest @ ..], Inline(xs) | Expand(xs)) => match xs.get_mut(*p) {
+                None => Err(expr),
+                Some(x) => x.set(rest, expr),
+            },
+            (_, Atom(_) | Stat(_)) => Err(expr),
+        }
+    }
+
     fn list_with_style(
         xs: Vec<Self>,
         p: usize,
@@ -115,7 +131,7 @@ impl Default for PrettyFormatter {
 
 pub struct Pretty<T> {
     pf: PrettyFormatter,
-    pe: PrettyExpr<T>,
+    pub pe: PrettyExpr<T>,
 }
 
 impl<T> Pretty<T> {
@@ -139,15 +155,30 @@ impl PrettyFormatter {
     }
 
     pub fn prepare<T>(&self, pe: PrettyExpr<T>) -> PrettyExpr<T> {
+        self.prepare_recursively(pe, 0)
+    }
+
+    fn prepare_recursively<T>(&self, pe: PrettyExpr<T>, current_indent: usize) -> PrettyExpr<T> {
         match pe {
             PrettyExpr::Atom(x) => PrettyExpr::Atom(x),
             PrettyExpr::Stat(x) => PrettyExpr::Stat(x),
-            PrettyExpr::Inline(_) if pe.inline_width() <= self.max_code_width => pe,
-            PrettyExpr::Inline(xs) => {
-                PrettyExpr::Expand(xs.into_iter().map(|x| self.prepare(x)).collect())
+            PrettyExpr::Inline(_) if current_indent + pe.inline_width() <= self.max_code_width => {
+                pe
             }
-            PrettyExpr::Expand(_) => pe,
-            PrettyExpr::Style(s, x) => PrettyExpr::styled(s, self.prepare(*x)),
+            PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) => {
+                let indent = current_indent
+                    + xs.first()
+                        .map(|x0| self.compute_expand_indent(x0))
+                        .unwrap_or(0);
+                PrettyExpr::Expand(
+                    xs.into_iter()
+                        .map(|x| self.prepare_recursively(x, indent))
+                        .collect(),
+                )
+            }
+            PrettyExpr::Style(s, x) => {
+                PrettyExpr::styled(s, self.prepare_recursively(*x, current_indent))
+            }
         }
     }
 
@@ -208,13 +239,12 @@ impl PrettyFormatter {
         f.write("(")?;
         match &xs[..] {
             [] => {}
-            [x] => self.write(x, indent_level, f)?,
+            [x] => {
+                indent_level += self.compute_expand_indent(x);
+                self.write(x, indent_level, f)?
+            }
             [x, ys @ ..] => {
-                if x.is_atom() {
-                    indent_level += self.default_indent;
-                } else {
-                    indent_level += 1;
-                }
+                indent_level += self.compute_expand_indent(x);
                 self.write(x, indent_level, f)?;
                 for y in ys {
                     f.write_indent(indent_level)?;
@@ -223,6 +253,14 @@ impl PrettyFormatter {
             }
         }
         f.write(")")
+    }
+
+    fn compute_expand_indent<T>(&self, first_item: &PrettyExpr<T>) -> usize {
+        if first_item.is_atom() {
+            self.default_indent
+        } else {
+            1
+        }
     }
 }
 
@@ -320,5 +358,10 @@ fn tests() {
         "(let\n  ((a 1)\n   (b 2)\n   (c 3))\n  (+ a b))"
     );
 
-    println!("{}", p![(let ((a 1) (b 2) (c 3)) ("+" a b))]);
+    println!("{}", p![(((((alpha (beta gamma) delta)))))]);
+    assert_eq!(
+        pf.pretty(p![(((((alpha (beta gamma) delta)))))])
+            .to_string(),
+        "(((((alpha\n      (beta\n        gamma)\n      delta)))))"
+    );
 }
