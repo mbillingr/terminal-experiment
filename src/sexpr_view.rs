@@ -81,7 +81,7 @@ impl SexprView {
                     *last = usize::min(c_elem, x.len() - 1)
                 }
             }
-            _ => {}
+            [] => {} //self.expr = PrettyExpr::empty_list(),
         }
     }
 
@@ -95,7 +95,7 @@ impl SexprView {
                     self.insert_element_after_cursor();
                 } else {
                     let elements = x.elements_mut().unwrap();
-                    elements.insert(c_elem + 1, PrettyExpr::Inline(vec![]));
+                    elements.insert(c_elem + 1, PrettyExpr::empty_list());
                     self.move_cursor_in_list(1);
                 }
             }
@@ -119,6 +119,8 @@ impl SexprView {
         let x = self.expr.get_mut(&self.cursor).unwrap();
         if let Some([y]) = x.elements() {
             *x = y.clone();
+        } else if let Some(y) = x.quoted_value() {
+            *x = y.clone();
         }
     }
 }
@@ -138,7 +140,12 @@ impl Item for SexprView {
         let mut pe = pf.pretty(self.expr.clone());
 
         pe = pe
-            .with_style(&self.cursor, style::ContentStyle::new().on_dark_green())
+            .with_style(&[], style::ContentStyle::new().black().on_grey())
+            .unwrap()
+            .with_style(
+                &self.cursor,
+                style::ContentStyle::new().white().on_dark_green(),
+            )
             .unwrap();
 
         let mut cf = CrosstermFormatter::new(buf, x, y);

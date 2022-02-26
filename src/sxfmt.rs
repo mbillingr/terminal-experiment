@@ -17,6 +17,9 @@ pub enum PrettyExpr<T = ()> {
 }
 
 impl<T> PrettyExpr<T> {
+    pub fn empty_list() -> Self {
+        PrettyExpr::Inline(vec![])
+    }
     pub fn list(xs: Vec<PrettyExpr<T>>) -> Self {
         PrettyExpr::Inline(xs)
     }
@@ -97,12 +100,7 @@ impl<T> PrettyExpr<T> {
     }
 
     pub fn is_quotation(&self) -> bool {
-        match self {
-            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => false,
-            PrettyExpr::Quote(_) => true,
-            PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => false,
-            PrettyExpr::Style(_, x) => x.is_atom(),
-        }
+        self.quoted_value().is_some()
     }
 
     pub fn is_empty_list(&self) -> bool {
@@ -122,6 +120,15 @@ impl<T> PrettyExpr<T> {
             PrettyExpr::Inline(xs) | PrettyExpr::Expand(xs) if xs.is_empty() => Some(""),
             PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => None,
             PrettyExpr::Style(_, x) => x.get_text(),
+        }
+    }
+
+    pub fn quoted_value(&self) -> Option<&Self> {
+        match self {
+            PrettyExpr::Atom(_) | PrettyExpr::Stat(_) => None,
+            PrettyExpr::Quote(x) => Some(x),
+            PrettyExpr::Inline(_) | PrettyExpr::Expand(_) => None,
+            PrettyExpr::Style(_, x) => x.quoted_value(),
         }
     }
 
