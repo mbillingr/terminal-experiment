@@ -1,18 +1,18 @@
-use crate::{CrosstermFormatter, EventHandler, Item, PrettyExpr, PrettyFormatter};
+use crate::backend::TextBuffer;
+use crate::{EventHandler, Item, PrettyExpr, PrettyFormatter, TextBufferFormatter};
 use crossterm::style::Stylize;
-use crossterm::{cursor, event, queue, style};
-use std::io::Write;
+use crossterm::{event, style};
 
 #[derive(Clone)]
 pub struct SexprView {
     expr: PrettyExpr<style::ContentStyle>,
-    width: u16,
-    height: u16,
+    width: usize,
+    height: usize,
     cursor: Vec<usize>,
 }
 
 impl SexprView {
-    pub fn new(expr: PrettyExpr<style::ContentStyle>, width: u16, height: u16) -> Self {
+    pub fn new(expr: PrettyExpr<style::ContentStyle>, width: usize, height: usize) -> Self {
         SexprView {
             expr,
             width,
@@ -126,15 +126,16 @@ impl SexprView {
 }
 
 impl Item for SexprView {
-    fn size(&self) -> (u16, u16) {
+    fn size(&self) -> (usize, usize) {
         return (self.width, self.height);
     }
 
-    fn draw(&self, buf: &mut impl Write, x: u16, y: u16) -> crossterm::Result<()> {
-        queue!(buf, cursor::MoveTo(x, y))?;
-        queue!(buf, style::Print(format!("{:?}", self.cursor)))?;
-        let y = y + 2;
-        queue!(buf, cursor::MoveTo(x, y))?;
+    fn resize(&mut self, width: usize, height: usize) {
+        self.width = width;
+        self.height = height;
+    }
+
+    fn draw(&self, buf: &mut TextBuffer, x: usize, y: usize) -> crossterm::Result<()> {
         let mut pf = PrettyFormatter::default();
         pf.max_code_width = self.width as usize;
         let mut pe = pf.pretty(self.expr.clone());
@@ -148,7 +149,7 @@ impl Item for SexprView {
             )
             .unwrap();
 
-        let mut cf = CrosstermFormatter::new(buf, x, y);
+        let mut cf = TextBufferFormatter::new(buf, x, y);
         pe.write(&mut cf)
     }
 }
