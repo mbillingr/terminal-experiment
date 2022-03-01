@@ -151,7 +151,7 @@ impl Item for SexprView {
     }
 }
 
-impl EventHandler for SexprView {
+impl EventHandler<event::Event> for SexprView {
     fn handle_event(&mut self, event: &event::Event) -> bool {
         use crossterm::event::Event::*;
         use crossterm::event::KeyCode::*;

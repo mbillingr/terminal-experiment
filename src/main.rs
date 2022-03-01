@@ -25,8 +25,8 @@ pub trait Item {
     fn draw(&self, buf: &mut TextBuffer, x: usize, y: usize) -> Result<()>;
 }
 
-pub trait EventHandler {
-    fn handle_event(&mut self, event: &Event) -> bool;
+pub trait EventHandler<E> {
+    fn handle_event(&mut self, event: &E) -> bool;
 }
 
 const DEFAULT_FRAME: [char; 9] = ['╔', '═', '╗', '║', ' ', '║', '╚', '═', '╝'];
