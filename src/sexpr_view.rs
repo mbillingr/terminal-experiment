@@ -1,18 +1,18 @@
 use crate::backend::TextBuffer;
+use crate::styles::Style;
 use crate::{EventHandler, Item, PrettyExpr, PrettyFormatter, TextBufferFormatter};
-use crossterm::style::Stylize;
-use crossterm::{event, style};
+use crossterm::event;
 
 #[derive(Clone)]
 pub struct SexprView {
-    expr: PrettyExpr<style::ContentStyle>,
+    expr: PrettyExpr<Style>,
     width: usize,
     height: usize,
     cursor: Vec<usize>,
 }
 
 impl SexprView {
-    pub fn new(expr: PrettyExpr<style::ContentStyle>, width: usize, height: usize) -> Self {
+    pub fn new(expr: PrettyExpr<Style>, width: usize, height: usize) -> Self {
         SexprView {
             expr,
             width,
@@ -141,12 +141,9 @@ impl Item for SexprView {
         let mut pe = pf.pretty(self.expr.clone());
 
         pe = pe
-            .with_style(&[], style::ContentStyle::new().black().on_grey())
+            .with_style(&[], Style::Default)
             .unwrap()
-            .with_style(
-                &self.cursor,
-                style::ContentStyle::new().white().on_dark_green(),
-            )
+            .with_style(&self.cursor, Style::Highlight)
             .unwrap();
 
         let mut cf = TextBufferFormatter::new(buf, x, y);

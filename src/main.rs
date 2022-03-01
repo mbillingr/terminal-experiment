@@ -1,6 +1,7 @@
 #[macro_use]
 mod sxfmt;
 mod sexpr_view;
+mod styles;
 mod terminal_backend;
 mod textbuffer;
 
@@ -8,17 +9,15 @@ use crate::backend::TextBuffer;
 use crate::sxfmt::{Formatter, PrettyExpr, PrettyFormatter};
 use crate::terminal_backend as backend;
 use crate::textbuffer::RenderTarget;
-use crossterm::style::{Attributes, Color};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{
     cursor,
     event::{read, Event, KeyCode, KeyEvent},
-    execute, queue, style,
-    style::ContentStyle,
-    terminal, ErrorKind, Result,
+    execute, terminal, ErrorKind, Result,
 };
 use sexpr_view::SexprView;
-use std::io::{stdout, Write};
+use std::io::stdout;
+use styles::Style;
 
 pub trait Item {
     fn size(&self) -> (usize, usize);
@@ -34,7 +33,7 @@ const DEFAULT_FRAME: [char; 9] = ['╔', '═', '╗', '║', ' ', '║', '╚',
 
 struct Framed<T: Item> {
     tiles: &'static [char],
-    style: ContentStyle,
+    style: Style,
     inner: T,
 }
 
@@ -42,11 +41,7 @@ impl<T: Item> Framed<T> {
     pub fn new(inner: T) -> Self {
         Framed {
             tiles: &DEFAULT_FRAME,
-            style: ContentStyle {
-                foreground_color: Some(Color::Blue),
-                background_color: Some(Color::Cyan),
-                attributes: Attributes::default(),
-            },
+            style: Style::Frame,
             inner,
         }
     }
@@ -90,69 +85,10 @@ impl<T: Item> Item for Framed<T> {
     }
 }
 
-struct CrosstermFormatter<'a, W: Write> {
-    buf: &'a mut W,
-    current_style: ContentStyle,
-    saved_styles: Vec<ContentStyle>,
-    start_column: u16,
-    current_row: u16,
-}
-
-impl<'a, W: Write> CrosstermFormatter<'a, W> {
-    pub fn new(buf: &'a mut W, x: u16, y: u16) -> Self {
-        CrosstermFormatter {
-            buf,
-            current_style: Default::default(),
-            saved_styles: vec![],
-            start_column: x,
-            current_row: y,
-        }
-    }
-}
-
-impl<'a, W: Write> Formatter<ContentStyle> for CrosstermFormatter<'a, W> {
-    type Error = ErrorKind;
-
-    fn write(&mut self, x: impl std::fmt::Display) -> std::result::Result<(), Self::Error> {
-        queue!(self.buf, style::Print(x))
-    }
-
-    fn set_style(&mut self, style: &ContentStyle) {
-        self.current_style = *style;
-
-        if let Some(fg) = style.foreground_color {
-            queue!(self.buf, style::SetForegroundColor(fg)).unwrap()
-        }
-
-        if let Some(bg) = style.background_color {
-            queue!(self.buf, style::SetBackgroundColor(bg)).unwrap()
-        }
-
-        queue!(self.buf, style::SetAttributes(style.attributes)).unwrap();
-    }
-
-    fn save_style(&mut self) {
-        self.saved_styles.push(self.current_style)
-    }
-
-    fn restore_style(&mut self) {
-        let style = self.saved_styles.pop().unwrap();
-        self.set_style(&style);
-    }
-
-    fn write_newline(&mut self) -> std::result::Result<(), Self::Error> {
-        self.current_row += 1;
-        queue!(
-            self.buf,
-            cursor::MoveTo(self.start_column, self.current_row)
-        )
-    }
-}
-
 struct TextBufferFormatter<'a> {
     buf: &'a mut TextBuffer,
-    current_style: ContentStyle,
-    saved_styles: Vec<ContentStyle>,
+    current_style: Style,
+    saved_styles: Vec<Style>,
     start_column: usize,
     current_row: usize,
     cursor: (usize, usize),
@@ -171,7 +107,7 @@ impl<'a> TextBufferFormatter<'a> {
     }
 }
 
-impl<'a> Formatter<ContentStyle> for TextBufferFormatter<'a> {
+impl<'a> Formatter<Style> for TextBufferFormatter<'a> {
     type Error = ErrorKind;
 
     fn write(&mut self, x: impl std::fmt::Display) -> std::result::Result<(), Self::Error> {
@@ -183,7 +119,7 @@ impl<'a> Formatter<ContentStyle> for TextBufferFormatter<'a> {
         Ok(())
     }
 
-    fn set_style(&mut self, style: &ContentStyle) {
+    fn set_style(&mut self, style: &Style) {
         self.current_style = *style;
     }
 
@@ -217,14 +153,7 @@ fn main() -> Result<()> {
     let mut sxv = SexprView::new(exp, 25, 10);
 
     loop {
-        buffer.clear(
-            '╳',
-            ContentStyle {
-                foreground_color: Some(Color::Green),
-                background_color: Some(Color::Black),
-                attributes: Attributes::default(),
-            },
-        );
+        buffer.clear('╳', Style::Background);
 
         Framed::new(sxv.clone()).draw(&mut buffer, 2, 1)?;
 
