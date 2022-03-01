@@ -1,7 +1,7 @@
 use crate::backend::TextBuffer;
+use crate::events::Event;
 use crate::styles::Style;
 use crate::{EventHandler, Item, PrettyExpr, PrettyFormatter, TextBufferFormatter};
-use crossterm::event;
 
 #[derive(Clone)]
 pub struct SexprView {
@@ -151,41 +151,29 @@ impl Item for SexprView {
     }
 }
 
-impl EventHandler<event::Event> for SexprView {
-    fn handle_event(&mut self, event: &event::Event) -> bool {
-        use crossterm::event::Event::*;
-        use crossterm::event::KeyCode::*;
-        use crossterm::event::KeyEvent;
+impl EventHandler<Event> for SexprView {
+    fn handle_event(&mut self, event: &Event) -> bool {
+        use Event::*;
         match event {
-            Key(KeyEvent { code: Left, .. }) => self.move_cursor_out_of_list(),
-            Key(KeyEvent { code: Right, .. }) => self.move_cursor_into_list(),
-            Key(KeyEvent { code: Down, .. }) => self.move_cursor_in_list(1),
-            Key(KeyEvent { code: Up, .. }) => self.move_cursor_in_list(-1),
-            Key(KeyEvent { code: Delete, .. }) => self.delete_cursor_element(),
-            Key(KeyEvent { code: PageUp, .. }) => self.wrap_cursor_in_list(),
-            Key(KeyEvent { code: PageDown, .. }) => self.unwrap_unary_list_at_cursor(),
-            Key(KeyEvent {
-                code: Char('\''), ..
-            }) => {
+            NavLeft => self.move_cursor_out_of_list(),
+            NavRight => self.move_cursor_into_list(),
+            NavDown => self.move_cursor_in_list(1),
+            NavUp => self.move_cursor_in_list(-1),
+            EditWrap => self.wrap_cursor_in_list(),
+            EditUnwrap => self.unwrap_unary_list_at_cursor(),
+            EditDelete => self.delete_cursor_element(),
+            Edit('\'') => {
                 self.quote_cursor();
                 self.move_cursor_into_list();
             }
-            Key(KeyEvent {
-                code: Char('('), ..
-            }) => {
+            Edit('(') => {
                 self.wrap_cursor_in_list();
                 self.move_cursor_into_list();
             }
-            Key(KeyEvent {
-                code: Char(')'), ..
-            }) => self.move_cursor_out_of_list(),
-            Key(KeyEvent {
-                code: Char(' '), ..
-            }) => self.insert_element_after_cursor(),
-            Key(KeyEvent { code: Char(ch), .. }) => self.append_at_cursor(&ch.to_string()),
-            Key(KeyEvent {
-                code: Backspace, ..
-            }) => self.delete_at_cursor(),
+            Edit(')') => self.move_cursor_out_of_list(),
+            Edit(' ') => self.insert_element_after_cursor(),
+            Edit(ch) => self.append_at_cursor(&ch.to_string()),
+            EditBackspace => self.delete_at_cursor(),
             _ => return false,
         }
         true

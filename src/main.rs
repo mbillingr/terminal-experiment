@@ -1,11 +1,12 @@
 #[macro_use]
 mod sxfmt;
+mod events;
 mod sexpr_view;
 mod styles;
 mod terminal_backend;
 mod textbuffer;
 
-use crate::backend::TextBuffer;
+use crate::backend::{adapt_event, TextBuffer};
 use crate::sxfmt::{Formatter, PrettyExpr, PrettyFormatter};
 use crate::terminal_backend as backend;
 use crate::textbuffer::RenderTarget;
@@ -160,7 +161,7 @@ fn main() -> Result<()> {
         buffer.render(&mut stdout)?;
 
         let event = read()?;
-        if !sxv.handle_event(&event) {
+        if !sxv.handle_event(&adapt_event(event)) {
             match event {
                 Event::Resize(w, h) => {
                     buffer.resize(w as usize, h as usize);
